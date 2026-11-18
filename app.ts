@@ -1,27 +1,40 @@
-// The starter's HTTP surface, exactly as it ships: a health probe and an API root, and a JSON 404
-// for everything else. The contest's real surface — git smart HTTP, REST v3 resources, GraphQL v4 and
-// the MCP endpoint — is what you add (README.md names it, and the rules link below says what scores).
-//
-// app.ts is deliberately separate from main.ts: this is the server, the file you grow; main.ts is the
-// entry <-> env lifecycle and should stay as it is.
+// The forge's HTTP surface: the lifecycle probe, REST v3 under /api/v3, and a JSON 404 for
+// everything else. app.ts is the file the surfaces grow in; main.ts stays the entry lifecycle.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { Store } from './src/store.ts';
+import { handleRest } from './src/rest.ts';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 
-/** Answer one request with a JSON body; `headers` go beside the JSON ones. */
-function sendJson(res: ServerResponse, status: number, body: unknown, headers: Readonly<Record<string, string>> = {}): void {
+export const STORE = new Store();
+export const TOKEN = process.env.MAKEFUN_SHOP_TOKEN ?? null;
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = `${JSON.stringify(body)}\n`;
-  res.writeHead(status, { 'content-type': JSON_TYPE, 'content-length': Buffer.byteLength(text), ...headers });
+  res.writeHead(status, { 'content-type': JSON_TYPE, 'content-length': Buffer.byteLength(text) });
   res.end(text);
 }
 
-/** The path of a request URL, or '/' when it does not parse (never a throw from a request). */
+function bearerToken(req: IncomingMessage): string | null {
+  const header = req.headers.authorization ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match === null ? null : match[1]!.trim();
+}
+
 function pathOf(req: IncomingMessage): string {
   try {
     return new URL(req.url ?? '/', 'http://entry').pathname;
   } catch {
     return '/';
+  }
+}
+
+function queryOf(req: IncomingMessage): URLSearchParams {
+  try {
+    return new URL(req.url ?? '/', 'http://entry').searchParams;
+  } catch {
+    return new URLSearchParams();
   }
 }
 
@@ -31,19 +44,18 @@ export function createApp(): Server {
     const path = pathOf(req);
     const method = req.method ?? 'GET';
 
-    // The env's boot check calls this twice: 200 {"ok":true}.
     if (method === 'GET' && path === '/healthz') {
       sendJson(res, 200, { ok: true });
       return;
     }
 
-    // The GitHub API root: a 200 with the token's scopes, as api.github.com answers GET /.
-    if (method === 'GET' && (path === '/api/v3' || path === '/api/v3/')) {
-      sendJson(res, 200, { current_user_url: '/api/v3/user', rate_limit_url: '/api/v3/rate_limit' }, { 'x-oauth-scopes': 'repo, read:org' });
+    if (path === '/api/v3' || path === '/api/v3/' || path.startsWith('/api/v3/')) {
+      handleRest(req, res, path, queryOf(req), bearerToken(req), TOKEN, STORE).catch(() => {
+        sendJson(res, 500, { message: 'Internal Server Error' });
+      });
       return;
     }
 
-    // Everything else, every method: GitHub's 404 body.
     sendJson(res, 404, { message: 'Not Found' });
   });
 }
