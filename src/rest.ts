@@ -15,7 +15,7 @@ import {
   listBranches,
   listTree,
   lookupPath,
-  mergeBase,
+  mergePullRequestRecord,
   nowIso,
   parseCommit,
   resolveCommitish,
@@ -648,39 +648,12 @@ export async function handleRest(req: IncomingMessage, res: ServerResponse, path
       }
 
       if (subSub === 'merge' && method === 'PUT') {
-        if (pull.state !== 'open' || pull.merged) {
-          sendError(res, 405, `Pull Request ${number} is not mergeable`);
+        const result = mergePullRequestRecord(repo, pull);
+        if (!result.ok) {
+          sendError(res, 405, result.reason);
           return;
         }
-        const baseTip = resolveCommitish(repo, pull.baseRef);
-        const headTip = resolveCommitish(repo, pull.headRef);
-        if (baseTip === null || headTip === null) {
-          sendError(res, 405, `Pull Request ${number} is not mergeable`);
-          return;
-        }
-        const mb = mergeBase(repo, baseTip, headTip);
-        const baseChanges = diffTrees(repo, mb, baseTip);
-        const headChanges = diffTrees(repo, mb, headTip);
-        for (const [path, sha] of headChanges) {
-          if (baseChanges.has(path) && baseChanges.get(path) !== sha) {
-            sendError(res, 405, `Pull Request ${number} has conflicts`);
-            return;
-          }
-        }
-        const merged = commitFiles(repo, `refs/heads/${pull.baseRef}`, headChanges, {
-          message: `${pull.title} (#${number})`,
-          parents: [baseTip],
-        });
-        pull.state = 'closed';
-        pull.merged = true;
-        pull.mergedAt = nowIso();
-        pull.mergeCommitSha = merged;
-        const issue = repo.issues.get(number);
-        if (issue !== undefined) {
-          issue.state = 'closed';
-          issue.closedAt = pull.mergedAt;
-        }
-        sendJson(res, 200, { sha: merged, merged: true, message: 'Pull Request successfully merged' });
+        sendJson(res, 200, { sha: result.sha, merged: true, message: 'Pull Request successfully merged' });
         return;
       }
 

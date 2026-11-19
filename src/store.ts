@@ -438,6 +438,36 @@ export function unpackObject(raw: Uint8Array): { type: string; data: Uint8Array 
   }
 }
 
+/** The shared squash-merge the REST PUT .../merge and the GraphQL mergePullRequest both run. */
+export function mergePullRequestRecord(repo: RepoRecord, pull: PullRecord): { ok: true; sha: string } | { ok: false; reason: string } {
+  if (pull.state !== 'open' || pull.merged) return { ok: false, reason: `Pull Request ${pull.number} is not mergeable` };
+  const baseTip = resolveCommitish(repo, pull.baseRef);
+  const headTip = resolveCommitish(repo, pull.headRef);
+  if (baseTip === null || headTip === null) return { ok: false, reason: `Pull Request ${pull.number} is not mergeable` };
+  const mb = mergeBase(repo, baseTip, headTip);
+  const baseChanges = diffTrees(repo, mb, baseTip);
+  const headChanges = diffTrees(repo, mb, headTip);
+  for (const [path, sha] of headChanges) {
+    if (baseChanges.has(path) && baseChanges.get(path) !== sha) {
+      return { ok: false, reason: `Pull Request ${pull.number} has conflicts` };
+    }
+  }
+  const merged = commitFiles(repo, `refs/heads/${pull.baseRef}`, headChanges, {
+    message: `${pull.title} (#${pull.number})`,
+    parents: [baseTip],
+  });
+  pull.state = 'closed';
+  pull.merged = true;
+  pull.mergedAt = nowIso();
+  pull.mergeCommitSha = merged;
+  const issue = repo.issues.get(pull.number);
+  if (issue !== undefined) {
+    issue.state = 'closed';
+    issue.closedAt = pull.mergedAt;
+  }
+  return { ok: true, sha: merged };
+}
+
 /** Count line additions and deletions between two blob texts (a simple multiset line diff). */
 export function lineCounts(before: string, after: string): { additions: number; deletions: number } {
   const beforeLines = before.split('\n');

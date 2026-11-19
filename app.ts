@@ -4,6 +4,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { Store, hashObject } from './src/store.ts';
 import { handleRest } from './src/rest.ts';
+import { handleGraphQLRequest } from './src/graphql.ts';
 import { infoRefsReceivePack, infoRefsUploadPack, receivePack, uploadPack } from './src/git-smart.ts';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -114,6 +115,7 @@ async function handleGit(req: IncomingMessage, res: ServerResponse, path: string
 /** Build the server. It binds nothing until the caller listens; the entry listens on an ephemeral port. */
 export function createApp(): Server {
   return createServer((req: IncomingMessage, res: ServerResponse) => {
+    void (async (): Promise<void> => {
     const path = pathOf(req);
     const method = req.method ?? 'GET';
 
@@ -129,6 +131,27 @@ export function createApp(): Server {
       return;
     }
 
+    if (path === '/api/graphql') {
+      if (bearerToken(req) !== TOKEN) {
+        sendJson(res, 401, { message: 'Bad credentials' });
+        return;
+      }
+      if (method !== 'POST') {
+        sendJson(res, 405, { message: 'Method Not Allowed' });
+        return;
+      }
+      const body = await readRawBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body.toString('utf8'));
+      } catch {
+        sendJson(res, 400, { message: 'Problems parsing JSON' });
+        return;
+      }
+      sendJson(res, 200, handleGraphQLRequest(STORE, parsed).payload);
+      return;
+    }
+
     if (path.endsWith('.git') || path.includes('.git/')) {
       handleGit(req, res, path).catch(() => {
         res.writeHead(500, { 'content-type': 'text/plain' });
@@ -138,5 +161,8 @@ export function createApp(): Server {
     }
 
     sendJson(res, 404, { message: 'Not Found' });
+    })().catch(() => {
+      sendJson(res, 500, { message: 'Internal Server Error' });
+    });
   });
 }
