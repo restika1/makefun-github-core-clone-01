@@ -6,7 +6,7 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { viewerUser } from './scenario.ts';
 
 export interface GitObject {
-  type: 'blob' | 'tree' | 'commit';
+  type: 'blob' | 'tree' | 'commit' | 'tag';
   data: Uint8Array;
 }
 
