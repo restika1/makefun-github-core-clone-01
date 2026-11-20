@@ -1,13 +1,14 @@
-// The entry <-> env lifecycle, as env/src/wire.ts settles it: bind an ephemeral port, tell the env the
-// port it bound, then poll until the env says the trial is over and exit 0. Keep this file as it is:
-// the suite scores the server app.ts builds, and the lifecycle is the harness's, not the contest's.
+// The forge's entrypoint: one process that binds an ephemeral port, tells the contest env the port
+// it bound, then polls until the env says the trial is over and exits 0. The lifecycle is the
+// harness's, not the contest's — the suite scores the server app.ts builds — so this file stays
+// minimal on purpose:
 //
 //   1. MAKEFUN_ENV_URL names the env's origin (http://store:8080 in a trial container). Without it
 //      there is nothing to talk to, so the program exits 1 at once.
 //   2. Create the server and listen(0): the kernel picks a free port. Never bind 8080 — the env owns it.
 //   3. POST $MAKEFUN_ENV_URL/register {"port": N}. The env records the address the request came from
-//      plus N as your base URL and dials it from then on. The first register wins; a 409 means another
-//      entry already registered, and this process keeps waiting like any other.
+//      plus N as the entry's base URL and dials it from then on. The first register wins; a 409 means
+//      another entry already registered, and this process keeps waiting like any other.
 //   4. GET $MAKEFUN_ENV_URL/done until the body is {"done": true}. The env answers at once ({"done":
 //      false} while the suite runs), so this is a poll, not a long-held request. A failed or slow poll
 //      is retried with a short exponential backoff; the process never exits before the env says done.
