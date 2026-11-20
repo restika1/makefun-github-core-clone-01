@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Store, hashObject } from './src/store.ts';
 import { handleRest } from './src/rest.ts';
 import { handleGraphQLRequest } from './src/graphql.ts';
+import { handleMcpBody } from './src/mcp.ts';
 import { infoRefsReceivePack, infoRefsUploadPack, receivePack, uploadPack } from './src/git-smart.ts';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -149,6 +150,22 @@ export function createApp(): Server {
         return;
       }
       sendJson(res, 200, handleGraphQLRequest(STORE, parsed).payload);
+      return;
+    }
+
+    if (path === '/mcp') {
+      if (bearerToken(req) !== TOKEN) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Requires authentication' }));
+        return;
+      }
+      const body = await readRawBody(req);
+      const answer = handleMcpBody(STORE, body.toString('utf8'));
+      res.writeHead(answer.status, {
+        'content-type': answer.body === '' ? 'text/plain' : 'application/json',
+        'content-length': Buffer.byteLength(answer.body),
+      });
+      res.end(answer.body);
       return;
     }
 
